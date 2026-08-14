@@ -137,16 +137,26 @@ and **AWS credentials** (`aws login` / `aws configure`). 115 tests, 100%.
 - [x] Test fixture parses table schema from `template.yaml`
       CFN-tag-tolerant loader in conftest; the moto table is now built from
       the template's own AttributeDefinitions/GSIs/TTL.
-- [ ] Manual dev deploy; `scripts/smoke.sh` green against live URL
-      Script written (13 checks incl. DynamoDB traceability), `bash -n`
-      clean. Blocked: **no AWS credentials on this machine** (`aws sts
-      get-caller-identity` → NoCredentials) and no docker to build/push.
+- [ ] First deploy; `scripts/smoke.sh` green against live URL
+      **Revised:** with AWS credentials now present but docker still absent
+      locally, the first deploy goes through the Phase 5 pipeline (GitHub
+      runners have docker) instead of `sam deploy` from this machine —
+      Phase 5's OIDC bootstrap was pulled forward to enable it. The smoke
+      run against the live URL still closes this box.
 - [ ] Cold start + warm p95 measured vs. NFR-0006; numbers recorded
       Blocked on the deploy above.
 
-## Phase 5 — CI/CD
-- [ ] OIDC provider + deploy role (bootstrap pattern from serverless-order-api)
-- [ ] `deploy.yml`: test → build → ECR push → sam deploy → smoke
+## Phase 5 — CI/CD (pulled forward to carry the Phase 4 deploy)
+- [x] OIDC provider + deploy role (bootstrap pattern from serverless-order-api)
+      `bootstrap/github-oidc.yaml`, cfn-lint clean, deployed as
+      `cust-churn-service-bootstrap`. Reuses the account's existing OIDC
+      provider and the sibling's subject lessons (environment-based subject,
+      numeric ids) verbatim; adds ECR statements for the container image.
+      `production` environment locked to `main`; `AWS_DEPLOY_ROLE_ARN` and
+      `AWS_REGION` set as repository variables.
+- [ ] `deploy.yml`: test → train (hash-verified dataset) → sam build →
+      sam deploy → ECR keep-2 lifecycle policy → smoke
+      Written; first run pending.
 - [ ] Branch protection: PR + green CI required
 - [ ] A trivial merged PR reaches production unattended
 

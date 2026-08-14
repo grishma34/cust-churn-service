@@ -1,0 +1,144 @@
+name: Deploy
+
+# Merging to main reaches production with no manual step and no long-lived AWS
+# keys — credentials are minted per run by OIDC. The runner also solves this
+# project's local-tooling gap: the container image is built HERE (docker lives
+# on the runner), trained on a dataset downloaded and hash-verified in-run.
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  id-token: write # mint the OIDC token
+  contents: read
+
+concurrency:
+  # Serialise deploys; never cancel a CloudFormation update mid-flight.
+  group: deploy-production
+  cancel-in-progress: false
+
+env:
+  AWS_REGION: ${{ vars.AWS_REGION || 'ap-southeast-2' }}
+  STACK_NAME: cust-churn-service
+  DATASET_URL: https://raw.githubusercontent.com/IBM/telco-customer-churn-on-icp4d/master/data/Telco-Customer-Churn.csv
+  DATASET_SHA256: 16320c9c1ec72448db59aa0a26a0b95401046bef5d02fd3aeb906448e3055e91
+
+jobs:
+  test:
+    # The same gate CI runs, re-run here so a deploy can never outrun it.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version-file: .python-version
+          cache: pip
+          cache-dependency-path: |
+            requirements-dev.txt
+            src/requirements.txt
+            training/requirements.txt
+      - name: Install dependencies
+        run: pip install -r requirements-dev.txt
+      - name: Lint
+        run: |
+          ruff check src training tests scripts
+          ruff format --check src training tests scripts
+      - name: Tests
+        run: pytest --cov=src --cov-fail-under=90
+
+  deploy:
+    needs: test
+    # Skip cleanly until the account is bootstrapped (bootstrap/github-oidc.yaml).
+    if: vars.AWS_DEPLOY_ROLE_ARN != ''
+    runs-on: ubuntu-latest
+    environment: production # the OIDC subject names this environment
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version-file: .python-version
+          cache: pip
+          cache-dependency-path: |
+            requirements-dev.txt
+            src/requirements.txt
+            training/requirements.txt
+      - uses: aws-actions/setup-sam@v2
+        with:
+          use-installer: true
+
+      - name: Download and verify dataset
+        # The trained model is only as trustworthy as its input bytes; the
+        # sha256 recorded in data/README.md gates the download (REQ-0007).
+        run: |
+          curl -sL -o data/telco.csv "$DATASET_URL"
+          echo "$DATASET_SHA256  data/telco.csv" | sha256sum -c
+
+      - name: Train model
+        # Produces artifacts/model.joblib + model_meta.json with
+        # model_version = <semver>+<this commit's sha7> — the image built
+        # below is traceable to this exact run.
+        run: |
+          pip install -r training/requirements.txt
+          python -m training.train --data data/telco.csv --out artifacts
+
+      - name: Assume deploy role via OIDC
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+          role-session-name: github-deploy-${{ github.run_id }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Build container image
+        run: sam build
+
+      - name: Deploy stack
+        run: |
+          sam deploy \
+            --stack-name "$STACK_NAME" \
+            --region "$AWS_REGION" \
+            --no-confirm-changeset \
+            --no-fail-on-empty-changeset
+
+      - name: Apply ECR lifecycle policy (keep 2 images)
+        # NFR-0008: a ~700MB sklearn image accumulating tags would creep past
+        # the cost cap. Current + one rollback target is enough. The repo name
+        # comes from the deployed function's ImageUri — never guessed.
+        run: |
+          IMAGE_URI=$(aws lambda get-function \
+            --function-name "$STACK_NAME-inference" --region "$AWS_REGION" \
+            --query 'Code.ImageUri' --output text)
+          REPO_NAME=$(echo "$IMAGE_URI" | sed -E 's|^[^/]+/([^:@]+).*|\1|')
+          echo "repo: $REPO_NAME"
+          aws ecr put-lifecycle-policy --region "$AWS_REGION" \
+            --repository-name "$REPO_NAME" \
+            --lifecycle-policy-text '{
+              "rules": [{
+                "rulePriority": 1,
+                "description": "keep only the 2 most recent images (NFR-0008)",
+                "selection": {
+                  "tagStatus": "any",
+                  "countType": "imageCountMoreThan",
+                  "countNumber": 2
+                },
+                "action": {"type": "expire"}
+              }]
+            }'
+
+      - name: Smoke checklist
+        run: STACK_NAME="$STACK_NAME" bash scripts/smoke.sh
+
+      - name: Summary
+        run: |
+          URL=$(aws cloudformation describe-stacks --stack-name "$STACK_NAME" \
+            --region "$AWS_REGION" \
+            --query "Stacks[0].Outputs[?OutputKey=='FunctionUrl'].OutputValue" \
+            --output text)
+          {
+            echo "### Deployed"
+            echo ""
+            echo "- Stack: \`$STACK_NAME\`"
+            echo "- Function URL: $URL"
+            echo "- Model: \`$(curl -s "${URL%/}/health" | python3 -c 'import json,sys;print(json.load(sys.stdin)["model_version"])')\`"
+            echo "- Commit: \`${{ github.sha }}\`"
+          } >> "$GITHUB_STEP_SUMMARY"

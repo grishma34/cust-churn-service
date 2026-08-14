@@ -1,0 +1,227 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >
+  One-time bootstrap: the role GitHub Actions assumes via OIDC to deploy this
+  project. No long-lived AWS keys exist anywhere. Deployed separately from
+  template.yaml because this role is what deploys that stack.
+
+  Pattern lifted from serverless-order-api's bootstrap, including its two
+  hard-won OIDC subject lessons (environment-based subject, numeric ids);
+  the ECR statements are new here because this project deploys a Lambda
+  CONTAINER IMAGE rather than a zip.
+
+Parameters:
+  GitHubOrg:
+    Type: String
+    Description: GitHub account that owns the repository.
+
+  GitHubRepo:
+    Type: String
+    Default: cust-churn-service
+
+  GitHubOrgId:
+    Type: String
+    Description: >
+      Numeric GitHub account id. GitHub's default OIDC subject carries
+      immutable numeric ids: `repo:NAME@ORGID/NAME@REPOID:...`. Read it from
+      GitHub (`gh api repos/:owner/:repo --jq .owner.id`), never assemble by
+      hand.
+
+  GitHubRepoId:
+    Type: String
+    Description: Numeric repository id (`gh api repos/:owner/:repo --jq .id`).
+
+  DeployEnvironment:
+    Type: String
+    Default: production
+    Description: >
+      The GitHub environment deploy.yml targets — a job that declares
+      `environment:` presents `...:environment:NAME` as its OIDC subject, NOT
+      `...:ref:refs/heads/BRANCH`. The branch restriction lives in the GitHub
+      environment's deployment-branch policy (main only).
+
+  ApplicationStackPrefix:
+    Type: String
+    Default: cust-churn-service
+
+  CreateOIDCProvider:
+    Type: String
+    Default: "false"
+    AllowedValues: ["true", "false"]
+    Description: >
+      false because the GitHub OIDC provider already exists in this account
+      (created by the serverless-order-api bootstrap) — an account can hold
+      only one.
+
+Conditions:
+  ShouldCreateProvider: !Equals [!Ref CreateOIDCProvider, "true"]
+
+Resources:
+  GitHubOIDCProvider:
+    Type: AWS::IAM::OIDCProvider
+    Condition: ShouldCreateProvider
+    Properties:
+      Url: https://token.actions.githubusercontent.com
+      ClientIdList:
+        - sts.amazonaws.com
+
+  DeployRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub "${ApplicationStackPrefix}-github-deploy"
+      Description: Assumed by GitHub Actions via OIDC to deploy the churn service.
+      MaxSessionDuration: 3600
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Federated: !If
+                - ShouldCreateProvider
+                - !Ref GitHubOIDCProvider
+                - !Sub >-
+                  arn:${AWS::Partition}:iam::${AWS::AccountId}:oidc-provider/token.actions.githubusercontent.com
+            Action: sts:AssumeRoleWithWebIdentity
+            Condition:
+              StringEquals:
+                # Exact-match subject: only this repo's production-environment
+                # jobs can assume the role. When this denies a deploy, read the
+                # presented subject out of CloudTrail rather than guessing.
+                token.actions.githubusercontent.com:aud: sts.amazonaws.com
+                token.actions.githubusercontent.com:sub: !Sub >-
+                  repo:${GitHubOrg}@${GitHubOrgId}/${GitHubRepo}@${GitHubRepoId}:environment:${DeployEnvironment}
+
+      Policies:
+        - PolicyName: DeployChurnServiceStack
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Sid: ManageApplicationStacks
+                Effect: Allow
+                Action:
+                  - cloudformation:CreateStack
+                  - cloudformation:UpdateStack
+                  - cloudformation:DeleteStack
+                  - cloudformation:DescribeStacks
+                  - cloudformation:DescribeStackEvents
+                  - cloudformation:DescribeStackResources
+                  - cloudformation:GetTemplateSummary
+                  - cloudformation:CreateChangeSet
+                  - cloudformation:DescribeChangeSet
+                  - cloudformation:ExecuteChangeSet
+                  - cloudformation:DeleteChangeSet
+                  - cloudformation:ListStackResources
+                Resource:
+                  - !Sub "arn:${AWS::Partition}:cloudformation:${AWS::Region}:${AWS::AccountId}:stack/${ApplicationStackPrefix}*/*"
+                  - !Sub "arn:${AWS::Partition}:cloudformation:${AWS::Region}:${AWS::AccountId}:stack/aws-sam-cli-managed-default/*"
+
+              - Sid: ReadTransforms
+                Effect: Allow
+                Action:
+                  - cloudformation:CreateChangeSet
+                  - cloudformation:DescribeChangeSet
+                Resource: !Sub "arn:${AWS::Partition}:cloudformation:${AWS::Region}:aws:transform/Serverless-2016-10-31"
+
+              - Sid: ManageFunctionRoles
+                Effect: Allow
+                Action:
+                  - iam:CreateRole
+                  - iam:DeleteRole
+                  - iam:GetRole
+                  - iam:PassRole
+                  - iam:TagRole
+                  - iam:UntagRole
+                  - iam:AttachRolePolicy
+                  - iam:DetachRolePolicy
+                  - iam:PutRolePolicy
+                  - iam:DeleteRolePolicy
+                  - iam:GetRolePolicy
+                  - iam:ListRolePolicies
+                  - iam:ListAttachedRolePolicies
+                # Only roles the app stack generates; the pipeline cannot touch
+                # this deploy role itself.
+                Resource: !Sub "arn:${AWS::Partition}:iam::${AWS::AccountId}:role/${ApplicationStackPrefix}-*"
+
+              - Sid: ManageApplicationResources
+                Effect: Allow
+                Action:
+                  - lambda:*
+                  - dynamodb:CreateTable
+                  - dynamodb:DeleteTable
+                  - dynamodb:DescribeTable
+                  - dynamodb:UpdateTable
+                  - dynamodb:UpdateTimeToLive
+                  - dynamodb:DescribeTimeToLive
+                  - dynamodb:DescribeContinuousBackups
+                  - dynamodb:UpdateContinuousBackups
+                  - dynamodb:TagResource
+                  - dynamodb:UntagResource
+                  - dynamodb:ListTagsOfResource
+                  # smoke.sh verifies the audit item landed (AP1)
+                  - dynamodb:GetItem
+                  - logs:CreateLogGroup
+                  - logs:DeleteLogGroup
+                  - logs:DescribeLogGroups
+                  - logs:PutRetentionPolicy
+                  - logs:TagResource
+                Resource: "*"
+
+              - Sid: PushAndManageImages
+                Effect: Allow
+                # Container-image deploys: sam creates the ECR repo
+                # (resolve_image_repos), docker-pushes the image, and the
+                # pipeline applies the keep-2 lifecycle policy (NFR-0008).
+                Action:
+                  - ecr:CreateRepository
+                  - ecr:DeleteRepository
+                  - ecr:DescribeRepositories
+                  - ecr:GetRepositoryPolicy
+                  - ecr:SetRepositoryPolicy
+                  - ecr:DeleteRepositoryPolicy
+                  - ecr:PutLifecyclePolicy
+                  - ecr:GetLifecyclePolicy
+                  - ecr:TagResource
+                  - ecr:ListTagsForResource
+                  - ecr:BatchCheckLayerAvailability
+                  - ecr:BatchGetImage
+                  - ecr:GetDownloadUrlForLayer
+                  - ecr:InitiateLayerUpload
+                  - ecr:UploadLayerPart
+                  - ecr:CompleteLayerUpload
+                  - ecr:PutImage
+                  - ecr:DescribeImages
+                  - ecr:BatchDeleteImage
+                Resource: !Sub "arn:${AWS::Partition}:ecr:${AWS::Region}:${AWS::AccountId}:repository/*"
+
+              - Sid: EcrAuthToken
+                Effect: Allow
+                Action: ecr:GetAuthorizationToken # account-level, no resource ARN exists
+                Resource: "*"
+
+              - Sid: ManageSamArtifactBucket
+                Effect: Allow
+                Action:
+                  - s3:CreateBucket
+                  - s3:PutBucketPolicy
+                  - s3:GetBucketPolicy
+                  - s3:PutBucketPublicAccessBlock
+                  - s3:PutEncryptionConfiguration
+                  - s3:GetEncryptionConfiguration
+                  - s3:PutBucketOwnershipControls
+                  - s3:GetBucketOwnershipControls
+                  - s3:GetBucketLocation
+                  - s3:ListBucket
+                  - s3:PutObject
+                  - s3:GetObject
+                Resource:
+                  - !Sub "arn:${AWS::Partition}:s3:::aws-sam-cli-managed-default-*"
+                  - !Sub "arn:${AWS::Partition}:s3:::aws-sam-cli-managed-default-*/*"
+
+Outputs:
+  DeployRoleArn:
+    Description: Set as the AWS_DEPLOY_ROLE_ARN repository variable in GitHub.
+    Value: !GetAtt DeployRole.Arn
+
+  TrustedSubject:
+    Description: The only OIDC subject permitted to assume the role.
+    Value: !Sub >-
+      repo:${GitHubOrg}@${GitHubOrgId}/${GitHubRepo}@${GitHubRepoId}:environment:${DeployEnvironment}
