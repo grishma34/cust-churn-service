@@ -68,6 +68,10 @@ Resources:
         - x86_64
       MemorySize: 1024
       Timeout: 30
+      # NFR-0008 abuse cap: at most 5 simultaneous executions. A request
+      # flood becomes throttled 429s instead of a bill; ~100 req/s of warm
+      # capacity remains, far above demo traffic.
+      ReservedConcurrentExecutions: 5
       Environment:
         Variables:
           TABLE_NAME: !Ref PredictionsTable

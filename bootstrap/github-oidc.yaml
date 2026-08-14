@@ -52,6 +52,12 @@ Parameters:
       (created by the serverless-order-api bootstrap) — an account can hold
       only one.
 
+  BudgetEmail:
+    Type: String
+    Description: >
+      Email that receives the cost alerts (NFR-0008). Budget notifications
+      email directly — no SNS subscription confirmation required.
+
 Conditions:
   ShouldCreateProvider: !Equals [!Ref CreateOIDCProvider, "true"]
 
@@ -215,6 +221,37 @@ Resources:
                 Resource:
                   - !Sub "arn:${AWS::Partition}:s3:::aws-sam-cli-managed-default-*"
                   - !Sub "arn:${AWS::Partition}:s3:::aws-sam-cli-managed-default-*/*"
+
+  # NFR-0008 backstop: alert before the account's WHOLE monthly bill (this
+  # project plus anything else) crosses $5, so a public-endpoint flood can
+  # never surprise anyone. Plain budgets are free.
+  MonthlyCostBudget:
+    Type: AWS::Budgets::Budget
+    Properties:
+      Budget:
+        BudgetName: cust-churn-service-account-monthly
+        BudgetType: COST
+        TimeUnit: MONTHLY
+        BudgetLimit:
+          Amount: 5
+          Unit: USD
+      NotificationsWithSubscribers:
+        - Notification:
+            NotificationType: ACTUAL
+            ComparisonOperator: GREATER_THAN
+            Threshold: 80 # $4 actually spent
+            ThresholdType: PERCENTAGE
+          Subscribers:
+            - SubscriptionType: EMAIL
+              Address: !Ref BudgetEmail
+        - Notification:
+            NotificationType: FORECASTED
+            ComparisonOperator: GREATER_THAN
+            Threshold: 100 # on track to exceed $5
+            ThresholdType: PERCENTAGE
+          Subscribers:
+            - SubscriptionType: EMAIL
+              Address: !Ref BudgetEmail
 
 Outputs:
   DeployRoleArn:

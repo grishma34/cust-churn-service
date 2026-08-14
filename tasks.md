@@ -224,3 +224,14 @@ proof (sequenced after Phases 6-7), Streamlit UI, drift report, polish.
       branch protection permits). Preconditions all met: service live,
       smoke 13/13, unattended pipeline proven twice — by push
       (run 31768725751) and by this PR.
+
+## Post-v1.0.0 hardening (public-endpoint abuse caps, NFR-0008)
+- [x] Reserved concurrency 5 on the inference function
+      A flood of requests at the public Function URL now throttles (429s)
+      instead of billing; ~100 warm req/s of headroom remains. Pinned by
+      `test_function_shape`.
+- [x] Account-level $5/month AWS Budget with email alerts
+      In `bootstrap/github-oidc.yaml` (account-scope concern, so it lives
+      with the account-scope stack): emails at 80% actual and 100%
+      forecasted spend. Covers the whole account, not just this project —
+      strictly more protective.
