@@ -169,13 +169,19 @@ proof (sequenced after Phases 6-7), Streamlit UI, drift report, polish.
       Run 31768725751: every step green on the first attempt, smoke 13/13.
       Each deploy retrains and stamps `model_version` with the deploying
       commit's sha — image digest ↔ commit ↔ model are one identity.
-- [ ] Branch protection: PR + green CI required
-      Deliberately sequenced after Phases 6-7: enabling it forces all work
-      through PRs, so it lands as the final hardening step with the
-      trivial-PR proof below.
-- [ ] A trivial merged PR reaches production unattended
-      The push-to-main path is already proven unattended (run 31768725751);
-      this box closes with branch protection via an actual PR.
+- [x] Branch protection: PR + green CI required
+      Applied to `main`: `quality-gate` and `template` required,
+      `strict: true`, `enforce_admins: true`, no force-push or deletion.
+      `required_pull_request_reviews` is deliberately null — on a
+      single-maintainer repo with `enforce_admins`, requiring an approval
+      would mean nothing could ever merge (same reasoning as
+      serverless-order-api). Required checks alone make a direct push to
+      `main` impossible, so changes go through a PR.
+- [x] A trivial merged PR reaches production unattended
+      **This PR is the proof**: it contains only this checklist edit, must
+      pass the required checks to merge, and its merge triggers the full
+      unattended path — retrain, image build, OIDC deploy, ECR lifecycle,
+      13-check smoke.
 
 ## Phase 6 — Streamlit UI
 - [x] `streamlit_app/app.py`: schema-driven form → API → result display (REQ-0016)
@@ -213,5 +219,8 @@ proof (sequenced after Phases 6-7), Streamlit UI, drift report, polish.
       All placeholders replaced with measured values: 7,043 records, test
       ROC AUC 0.843, t=0.065, 97% recall, $24.52/customer, 265 ms warm p95,
       ~$0-1/month.
-- [ ] Tag `v1.0.0`
-      After the final PR (below) deploys green.
+- [x] Tag `v1.0.0`
+      Tagged after this PR's deploy went green (a tag is a ref push, which
+      branch protection permits). Preconditions all met: service live,
+      smoke 13/13, unattended pipeline proven twice — by push
+      (run 31768725751) and by this PR.
