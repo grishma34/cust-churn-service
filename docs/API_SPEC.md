@@ -36,8 +36,10 @@ Pipeline was trained on, no client-side preprocessing.
 
 Validation (REQ-0013): all 19 fields required; categorical values must be in
 the training domain (enumerated in `src/shared/schema.py`, generated from the
-training data); numerics must be within sane bounds (`tenure` ≥ 0,
-charges ≥ 0). Unknown fields are rejected.
+training data); numerics must be numbers ≥ 0. `TotalCharges` may be `null`
+(blank in the source data for tenure-0 customers; imputed inside the
+Pipeline) — every other field is non-null. Unknown fields are rejected. All
+problems are reported in one response.
 
 ### Response 200
 

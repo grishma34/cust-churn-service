@@ -23,7 +23,13 @@ ROC AUC (0.848 vs 0.830), validation ROC AUC 0.836, well-calibrated
 holds model.joblib + model_meta.json (version `1.0.0+<sha7>`) + 3 evidence
 plots. **Test ROC AUC 0.843** (target ≥ 0.83, split touched once);
 threshold 0.065 from the $50/$450 cost sweep → 97% churner recall,
-$24.52/customer expected cost. 36 tests. Next: Phase 3 — inference service.
+$24.52/customer expected cost. 36 tests.
+
+**Phase 3 complete** (2026-08-14). Full request path works under pytest with
+no AWS account: handler → validate → Pipeline → threshold decision →
+conditional DynamoDB put + EMF line, all against the real fixture artifact
+on moto. Coverage gate live in CI at 90%; suite is 109 tests at 100%.
+Next: Phase 4 — container & AWS infra.
 
 ## Phase 0 — Skeleton & tooling
 - [x] Directory layout per `PROJECT_STRUCTURE.md` + `pyproject.toml` (ruff) + split requirements files
@@ -85,15 +91,32 @@ $24.52/customer expected cost. 36 tests. Next: Phase 3 — inference service.
       sample lands within 0.03 of the analytic optimum.
 
 ## Phase 3 — Inference service (local)
-- [ ] `src/model/artifact.py`: load at init, fail loudly (REQ-0009 prep)
-- [ ] `src/services/prediction_service.py`: validate → predict → decide → best-effort log (REQ-0008/0011/0013)
-- [ ] `src/data/prediction_repository.py`: PutItem + AP1/AP2/AP3, no Scan (REQ-0011)
-- [ ] `src/data/metrics_emitter.py`: EMF input distributions (REQ-0014)
-- [ ] `src/handlers/predict.py`: `/predict`, `/model`, `/health` + error decorator (REQ-0008/0012)
-- [ ] Validation matrix tests (REQ-0013)
-- [ ] **No-Scan assertions: botocore call log + static grep**
-- [ ] **End-to-end traceability test: response == DynamoDB item == model_meta version** (REQ-0010)
-- [ ] Coverage ≥ 90% — gate on from here (NFR-0001)
+- [x] `src/model/artifact.py`: load at init, fail loudly (REQ-0009 prep)
+      Singleton load; ArtifactError on missing/corrupt/wrong-shape; tested
+      that a container with a broken artifact dies at import, not at serve.
+- [x] `src/services/prediction_service.py`: validate → predict → decide → best-effort log (REQ-0008/0011/0013)
+      Repo + emitter injected (no boto3); threshold and version from
+      metadata only; audit/metrics failures logged, never surfaced.
+- [x] `src/data/prediction_repository.py`: PutItem + AP1/AP2/AP3, no Scan (REQ-0011)
+      Conditional PutItem (`attribute_not_exists`), Decimal-safe floats,
+      90-day TTL, cursor pagination on both GSIs.
+- [x] `src/data/metrics_emitter.py`: EMF input distributions (REQ-0014)
+      6 extracted metrics, no dimensions; a test fails the build if the
+      metric count exceeds the 10-free cap (NFR-0008). Categoricals ride the
+      log line for Logs Insights.
+- [x] `src/handlers/predict.py`: `/predict`, `/model`, `/health` + error decorator (REQ-0008/0012)
+      Artifact loads at module import; base64 bodies handled; 400/404/405
+      envelopes per API_SPEC.
+- [x] Validation matrix tests (REQ-0013)
+      All 19 missing-field cases parametrized; domain/type/bounds/unknown
+      matrix; all problems reported at once; model provably not invoked on
+      invalid input (exploding-pipeline spy).
+- [x] **No-Scan assertions: botocore call log + static grep**
+- [x] **End-to-end traceability test: response == DynamoDB item == model_meta version** (REQ-0010)
+      Plus the mutation test: rewrite model_version in the metadata, reload,
+      served version follows — no copy of the version exists in src/.
+- [x] Coverage ≥ 90% — gate on from here (NFR-0001)
+      `--cov-fail-under=90` live in CI; currently 100% (109 tests).
 
 ## Phase 4 — Container & AWS infra
 - [ ] `Dockerfile` (lambda/python:3.14, src + artifacts only); local RIE curl check (REQ-0009)
