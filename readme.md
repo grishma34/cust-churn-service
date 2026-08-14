@@ -14,6 +14,29 @@ monitored for data drift after release.
   — `GET /health` returns the deployed model version; endpoints in
   [`docs/API_SPEC.md`](docs/API_SPEC.md)
 
+## In four bullets
+
+- Trained and evaluated a churn classifier on **7,043** records, reaching
+  **0.843** ROC AUC on a held-out test set. Chose the decision threshold
+  (**0.065**) from what a false positive and a false negative actually cost
+  the business ($50 wasted retention offer vs. $450 lost customer) instead of
+  defaulting to 0.5 — catching **97% of churners** at an expected cost of
+  **$24.52 per customer**.
+- Kept preprocessing and the model together in a single scikit-learn
+  Pipeline, which prevents data leakage during training and stops training
+  and serving from drifting apart — both enforced by tests: a spy on
+  `Pipeline.fit` proves no validation or test row is ever fitted, and serving
+  code contains no `fit` call at all.
+- Deployed inference as a Lambda container image that returns the model
+  version (semver + git SHA) with every prediction, so any result can be
+  traced back to the exact model and commit that produced it; every
+  prediction is also written to a DynamoDB audit log carrying the same
+  version.
+- Built a Streamlit interface so non-technical users could test predictions
+  themselves, and logged input distributions to CloudWatch to watch for data
+  drift after release — a PSI-based drift report flags features that shift
+  beyond 0.2 against training baselines stored with the model.
+
 ## The claims, and what makes them true
 
 | Claim | Real number | Proof |
