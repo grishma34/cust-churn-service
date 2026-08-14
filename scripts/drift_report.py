@@ -93,9 +93,7 @@ def fetch_live_rows(log_group: str, hours: float, baselines: dict) -> list[dict]
             selects.append(feature)
         else:
             selects.append(f"features.{feature} as {feature}")
-    query = (
-        "filter ispresent(modelVersion) | fields " + ", ".join(selects) + " | limit 10000"
-    )
+    query = "filter ispresent(modelVersion) | fields " + ", ".join(selects) + " | limit 10000"
     end = int(time.time())
     start = logs.start_query(
         logGroupName=log_group,
@@ -117,9 +115,7 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--meta", type=Path, default=Path("artifacts/model_meta.json"))
     parser.add_argument("--hours", type=float, default=24.0)
-    parser.add_argument(
-        "--log-group", default="/aws/lambda/cust-churn-service-inference"
-    )
+    parser.add_argument("--log-group", default="/aws/lambda/cust-churn-service-inference")
     args = parser.parse_args(argv)
 
     meta = json.loads(args.meta.read_text())

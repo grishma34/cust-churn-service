@@ -46,8 +46,11 @@ def test_categorical_shift_is_flagged():
 
 
 def test_build_report_statuses_and_missing_data():
-    baselines = {"tenure": NUMERIC_BASELINE, "Contract": CATEGORICAL_BASELINE, "gender": {
-        "type": "categorical", "frequencies": {"Female": 0.5, "Male": 0.5}}}
+    baselines = {
+        "tenure": NUMERIC_BASELINE,
+        "Contract": CATEGORICAL_BASELINE,
+        "gender": {"type": "categorical", "frequencies": {"Female": 0.5, "Male": 0.5}},
+    }
     rows = [{"tenure": "1", "Contract": "Month-to-month"} for _ in range(50)]
     report = {r["feature"]: r for r in build_report(rows, baselines)}
     assert report["tenure"]["status"] == "DRIFT"  # all mass in one bin
