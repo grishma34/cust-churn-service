@@ -185,11 +185,12 @@ proof (sequenced after Phases 6-7), Streamlit UI, drift report, polish.
       (verified live: 76.5% for a tenure-0 month-to-month fiber profile).
       Thin-client boundary test-enforced (no boto3/sklearn/src imports).
       Served locally headless: HTTP 200, no errors.
-- [ ] Deployed to Streamlit Community Cloud; URL in README
-      Needs the account owner's browser: share.streamlit.io → sign in with
-      GitHub → New app → repo `grishma34/cust-churn-service`, branch `main`,
-      file `streamlit_app/app.py` → Deploy. No secrets needed (the live API
-      URL is the built-in default).
+- [x] Deployed to Streamlit Community Cloud; URL in README
+      Live at
+      `https://cust-churn-service-4n4yy8wr2pcouij7s5nzmh.streamlit.app`
+      (deployed by the account owner via share.streamlit.io; no secrets —
+      the live API URL is the app's built-in default). Public access
+      verified: serves the app shell to an anonymous browser session.
 - [x] Drift-guard test: form fields/domains == `schema.py`
       AST-extracted literals compared byte-for-byte to the generated
       domains; payload completeness and requirements thinness also pinned
