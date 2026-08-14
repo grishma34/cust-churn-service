@@ -3,6 +3,10 @@ from here, never inline)."""
 
 RANDOM_SEED = 42
 
+# Bump on any change that alters model behavior (features, estimator,
+# threshold policy). Full model_version = f"{MODEL_SEMVER}+{git sha7}".
+MODEL_SEMVER = "1.0.0"
+
 # Stratified 60/20/20 split (PLAN.md Phase 1). Fractions of the FULL dataset.
 TEST_FRACTION = 0.20
 VAL_FRACTION = 0.20

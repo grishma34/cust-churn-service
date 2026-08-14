@@ -17,8 +17,13 @@ NFR-0008 (< $5/month cloud cost) added mid-phase with its design consequences
 **Phase 1 complete** (2026-08-14). Training runs end-to-end on the real CSV
 in ~3 s: LogisticRegression selected over HistGradientBoosting by 5-fold CV
 ROC AUC (0.848 vs 0.830), validation ROC AUC 0.836, well-calibrated
-(ECE 0.019, no wrap needed). 25 tests, `src/` coverage 100%. Next:
-Phase 2 — threshold & artifact contract.
+(ECE 0.019, no wrap needed). 25 tests, `src/` coverage 100%.
+
+**Phase 2 complete** (2026-08-14). Artifact contract live: `artifacts/`
+holds model.joblib + model_meta.json (version `1.0.0+<sha7>`) + 3 evidence
+plots. **Test ROC AUC 0.843** (target ≥ 0.83, split touched once);
+threshold 0.065 from the $50/$450 cost sweep → 97% churner recall,
+$24.52/customer expected cost. 36 tests. Next: Phase 3 — inference service.
 
 ## Phase 0 — Skeleton & tooling
 - [x] Directory layout per `PROJECT_STRUCTURE.md` + `pyproject.toml` (ruff) + split requirements files
@@ -59,11 +64,25 @@ Phase 2 — threshold & artifact contract.
 - [x] Reproducibility test: two runs, identical metrics (NFR-0003)
 
 ## Phase 2 — Threshold & artifact
-- [ ] `training/threshold.py`: cost sweep (FP $50 / FN $450), cost-curve plot (REQ-0003)
-- [ ] `training/metadata.py`: `model_meta.json` with version+git-sha, threshold, metrics, baselines (REQ-0007)
-- [ ] `src/shared/schema.py` domains generated from training data (no drift)
-- [ ] Test-split evaluated once; ROC AUC ≥ 0.83 recorded (REQ-0002)
-- [ ] Threshold/cost/metadata unit tests
+- [x] `training/threshold.py`: cost sweep (FP $50 / FN $450), cost-curve plot (REQ-0003)
+      Real run: chosen t=0.065 (empirical min on validation; analytic optimum
+      0.10 marked on the plot alongside the rejected 0.5 default). Fails
+      loudly on a one-class validation split.
+- [x] `training/metadata.py`: `model_meta.json` with version+git-sha, threshold, metrics, baselines (REQ-0007)
+      `1.0.0+<sha7>`; dataset sha256; train-split baselines for all 19
+      features (numeric mean/std/quantiles/missing_rate, categorical
+      frequencies). A test proves the pickled Pipeline references no
+      `training.*` module — it unpickles in the pandas-free image.
+- [x] `src/shared/schema.py` domains generated from training data (no drift)
+      `scripts/gen_schema_domains.py` rewrites a marked block (43 values,
+      ruff-format-idempotent); test asserts domains cover the fixture.
+- [x] Test-split evaluated once; ROC AUC ≥ 0.83 recorded (REQ-0002)
+      **Test ROC AUC 0.843**, PR AUC 0.634, at t=0.065: tp=364 fp=601 fn=10
+      tn=434 (97% churner recall), expected cost $24.52/customer. Single
+      call site of `evaluate_final` enforced by AST test.
+- [x] Threshold/cost/metadata unit tests
+      Cost math hand-checked; known-minimum sweep; calibrated synthetic
+      sample lands within 0.03 of the analytic optimum.
 
 ## Phase 3 — Inference service (local)
 - [ ] `src/model/artifact.py`: load at init, fail loudly (REQ-0009 prep)

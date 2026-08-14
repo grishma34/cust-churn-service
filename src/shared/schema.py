@@ -1,9 +1,9 @@
 """Input schema for POST /predict (docs/API_SPEC.md).
 
-Phase 0 stub: field names and types only — these are structural facts of the
-Telco dataset and stable. Categorical DOMAINS are generated from the training
-data in Phase 2 (scripts side of training/metadata.py) so API validation and
-the Pipeline's vocabulary cannot drift; do not hand-type them here.
+Field names and types are structural facts of the Telco dataset and stable.
+CATEGORICAL_DOMAINS is GENERATED from the dataset by
+`scripts/gen_schema_domains.py` — never hand-edit the marked block; regenerate
+it, so API validation and the Pipeline's vocabulary cannot drift (REQ-0013).
 """
 
 NUMERIC_FIELDS: tuple[str, ...] = (
@@ -33,6 +33,82 @@ CATEGORICAL_FIELDS: tuple[str, ...] = (
 
 FEATURE_FIELDS: tuple[str, ...] = NUMERIC_FIELDS + CATEGORICAL_FIELDS
 
-# Generated in Phase 2 from training data; empty means "domain validation not
-# yet active" and ValidationError for domains must not be raised from a stub.
-CATEGORICAL_DOMAINS: dict[str, tuple[str, ...]] = {}
+# BEGIN GENERATED DOMAINS — scripts/gen_schema_domains.py; do not hand-edit
+CATEGORICAL_DOMAINS: dict[str, tuple[str | int, ...]] = {
+    "gender": (
+        "Female",
+        "Male",
+    ),
+    "SeniorCitizen": (
+        0,
+        1,
+    ),
+    "Partner": (
+        "No",
+        "Yes",
+    ),
+    "Dependents": (
+        "No",
+        "Yes",
+    ),
+    "PhoneService": (
+        "No",
+        "Yes",
+    ),
+    "MultipleLines": (
+        "No",
+        "No phone service",
+        "Yes",
+    ),
+    "InternetService": (
+        "DSL",
+        "Fiber optic",
+        "No",
+    ),
+    "OnlineSecurity": (
+        "No",
+        "No internet service",
+        "Yes",
+    ),
+    "OnlineBackup": (
+        "No",
+        "No internet service",
+        "Yes",
+    ),
+    "DeviceProtection": (
+        "No",
+        "No internet service",
+        "Yes",
+    ),
+    "TechSupport": (
+        "No",
+        "No internet service",
+        "Yes",
+    ),
+    "StreamingTV": (
+        "No",
+        "No internet service",
+        "Yes",
+    ),
+    "StreamingMovies": (
+        "No",
+        "No internet service",
+        "Yes",
+    ),
+    "Contract": (
+        "Month-to-month",
+        "One year",
+        "Two year",
+    ),
+    "PaperlessBilling": (
+        "No",
+        "Yes",
+    ),
+    "PaymentMethod": (
+        "Bank transfer (automatic)",
+        "Credit card (automatic)",
+        "Electronic check",
+        "Mailed check",
+    ),
+}
+# END GENERATED DOMAINS

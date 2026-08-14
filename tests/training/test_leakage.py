@@ -46,16 +46,22 @@ def test_nothing_fit_outside_train_split(monkeypatch):
         assert not leaked, f"fit() saw {len(leaked)} validation/test rows"
 
 
-def test_test_split_is_never_evaluated_in_phase_1():
-    """Phase 2 touches the test split exactly once; until then the trainer must
-    not even score it. Guard: no reference to y_test/X_test outside creation."""
+def test_test_split_is_scored_only_in_evaluate_final():
+    """REQ-0002: the test split is touched exactly once. Statically: the only
+    top-level definitions allowed to reference X_test/y_test are the split
+    itself, the container dataclasses, and evaluate_final — and evaluate_final
+    is called from exactly one site."""
+    import ast
+
     source = (REPO_ROOT / "training" / "train.py").read_text()
-    scoring_lines = [
-        line
-        for line in source.splitlines()
-        if re.search(r"(roc_auc_score|predict|score)\s*\(", line) and "test" in line.lower()
-    ]
-    assert not scoring_lines, f"test split appears in scoring code: {scoring_lines}"
+    allowed = {"split_dataset", "evaluate_final", "Splits", "TrainingResult"}
+    for node in ast.parse(source).body:
+        if isinstance(node, ast.FunctionDef | ast.ClassDef):
+            body = ast.unparse(node)
+            if "X_test" in body or "y_test" in body:
+                assert node.name in allowed, f"{node.name} touches the test split"
+    # one definition + one call site, nothing more
+    assert source.count("evaluate_final(") == 2
 
 
 def test_serving_code_never_fits():
@@ -79,7 +85,7 @@ def test_model_selection_cross_validates_the_whole_pipeline():
     assert "build_pipeline(" in call.group(1)
 
 
-@pytest.mark.parametrize("module", ["train", "features", "config"])
+@pytest.mark.parametrize("module", ["train", "features", "config", "threshold", "metadata"])
 def test_training_never_imports_serving(module):
     """claude.md rule 4: the artifact contract is the only interface."""
     source = (REPO_ROOT / "training" / f"{module}.py").read_text()

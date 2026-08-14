@@ -7,8 +7,8 @@ from tests.conftest import FIXTURE_CSV
 from training import config, train
 
 
-def test_run_end_to_end_and_summary_contract(capsys):
-    train.main(["--data", str(FIXTURE_CSV)])
+def test_run_end_to_end_and_summary_contract(capsys, tmp_path):
+    train.main(["--data", str(FIXTURE_CSV), "--out", str(tmp_path)])
     summary = json.loads(capsys.readouterr().out)
     assert summary["model"] in {"logistic_regression", "hist_gradient_boosting"}
     assert set(summary["cv_roc_auc"]) == {"logistic_regression", "hist_gradient_boosting"}
@@ -16,6 +16,13 @@ def test_run_end_to_end_and_summary_contract(capsys):
         assert 0.0 <= auc <= 1.0
     assert set(summary["validation"]) == {"roc_auc", "brier", "ece"}
     assert isinstance(summary["calibrated"], bool)
+    assert 0.0 < summary["threshold"]["value"] < 1.0
+    assert set(summary["test"]) >= {"roc_auc", "pr_auc", "confusion_at_threshold"}
+    # the full artifact lands on disk (REQ-0007)
+    assert (tmp_path / "model.joblib").exists()
+    assert (tmp_path / "model_meta.json").exists()
+    for plot in ("cost_curve", "reliability_curve", "roc_curve"):
+        assert (tmp_path / "plots" / f"{plot}.png").exists()
 
 
 def test_split_is_stratified_60_20_20():
@@ -39,3 +46,5 @@ def test_training_is_reproducible():
     assert first.calibrated == second.calibrated
     assert first.cv_auc == second.cv_auc
     assert first.val_metrics == second.val_metrics
+    assert first.threshold.threshold == second.threshold.threshold
+    assert first.test_metrics == second.test_metrics

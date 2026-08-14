@@ -32,6 +32,7 @@ cust-churn-service/
 │   ├── train.py               # entrypoint: fit, CV, calibrate, evaluate
 │   ├── threshold.py           # cost curve sweep, threshold selection (REQ-0003)
 │   ├── metadata.py            # model_meta.json writer incl. baselines (REQ-0007)
+│   ├── plots.py               # cost/reliability/ROC evidence plots
 │   └── requirements.txt       # pandas, scikit-learn, matplotlib (training-only)
 │
 ├── artifacts/                 # gitignored — output of training/train.py
@@ -61,6 +62,8 @@ cust-churn-service/
 │   └── requirements.txt       # streamlit, requests — no boto3, no sklearn
 │
 ├── scripts/
+│   ├── make_fixture.py        # regenerates data/fixtures/telco_60.csv (seeded)
+│   ├── gen_schema_domains.py  # regenerates CATEGORICAL_DOMAINS in schema.py
 │   ├── drift_report.py        # PSI vs. baselines in model_meta.json (REQ-0015)
 │   ├── audit_query.py         # AP2/AP3 CLI over the predictions table
 │   └── smoke.sh               # post-deploy checklist against the live URL

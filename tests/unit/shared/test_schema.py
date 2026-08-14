@@ -36,6 +36,19 @@ def test_schema_matches_fixture_columns(fixture_rows):
     assert columns == set(FEATURE_FIELDS) | {"customerID", "Churn"}
 
 
+def test_generated_domains_cover_every_categorical_field(fixture_rows):
+    """CATEGORICAL_DOMAINS is generated from the full dataset
+    (scripts/gen_schema_domains.py); every categorical field must have a
+    domain, and every value in the fixture must fall inside it (REQ-0013)."""
+    from shared.schema import CATEGORICAL_DOMAINS
+
+    assert set(CATEGORICAL_DOMAINS) == set(CATEGORICAL_FIELDS)
+    for row in fixture_rows:
+        for field in CATEGORICAL_FIELDS:
+            value = int(row[field]) if field == "SeniorCitizen" else row[field]
+            assert value in CATEGORICAL_DOMAINS[field], f"{field}={value!r} outside domain"
+
+
 def test_fixture_composition(fixture_rows):
     """The fixture stays useful: 60 rows, both classes present at roughly the
     real churn rate, and blank-TotalCharges rows kept for the coercion path."""

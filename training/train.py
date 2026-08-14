@@ -1,9 +1,10 @@
-"""Training entrypoint (REQ-0001/0002/0004): load → split → select → calibrate.
+"""Training entrypoint: load → split → select → calibrate → threshold →
+one-shot test evaluation → package (REQ-0001/0002/0003/0004/0007).
 
-Phase 1 scope: fit and honestly evaluate. The test split is created here but
-NOT evaluated — Phase 2 (threshold + artifact) touches it exactly once.
+The test split is evaluated exactly once, inside `evaluate_final` — a test
+enforces that no other function touches it.
 
-Usage: python -m training.train --data data/telco.csv
+Usage: python -m training.train --data data/telco.csv [--out artifacts]
 """
 
 import argparse
@@ -16,17 +17,23 @@ import pandas as pd
 from sklearn.calibration import CalibratedClassifierCV
 from sklearn.ensemble import HistGradientBoostingClassifier
 from sklearn.linear_model import LogisticRegression
-from sklearn.metrics import brier_score_loss, roc_auc_score
+from sklearn.metrics import (
+    average_precision_score,
+    brier_score_loss,
+    roc_auc_score,
+    roc_curve,
+)
 from sklearn.model_selection import StratifiedKFold, cross_val_score, train_test_split
 from sklearn.pipeline import Pipeline
 
-from training import config
+from training import config, metadata, plots
 from training.features import (
     FEATURE_COLUMNS,
     POSITIVE_LABEL,
     TARGET_COLUMN,
     build_pipeline,
 )
+from training.threshold import ThresholdResult, select_threshold
 
 
 def candidate_estimators() -> dict[str, object]:
@@ -110,6 +117,33 @@ def expected_calibration_error(
     return float(ece)
 
 
+def evaluate_final(
+    pipeline: Pipeline, threshold: float, splits: Splits
+) -> tuple[dict, tuple[list[float], list[float]]]:
+    """The ONLY function allowed to score the test split (REQ-0002); called
+    once per training run, after every model/threshold decision is final."""
+    proba = pipeline.predict_proba(splits.X_test)[:, 1]
+    y = splits.y_test
+    predicted = proba >= threshold
+    confusion = {
+        "tp": int(((y == 1) & predicted).sum()),
+        "fp": int(((y == 0) & predicted).sum()),
+        "fn": int(((y == 1) & ~predicted).sum()),
+        "tn": int(((y == 0) & ~predicted).sum()),
+    }
+    cost = (
+        config.COST_FALSE_POSITIVE * confusion["fp"] + config.COST_FALSE_NEGATIVE * confusion["fn"]
+    )
+    metrics = {
+        "roc_auc": float(roc_auc_score(y, proba)),
+        "pr_auc": float(average_precision_score(y, proba)),
+        "confusion_at_threshold": confusion,
+        "expected_cost_per_customer": float(cost / y.size),
+    }
+    fpr, tpr, _ = roc_curve(y, proba)
+    return metrics, (fpr.tolist(), tpr.tolist())
+
+
 @dataclass
 class TrainingResult:
     pipeline: Pipeline
@@ -117,6 +151,9 @@ class TrainingResult:
     calibrated: bool
     cv_auc: dict[str, float]
     val_metrics: dict[str, float]
+    threshold: ThresholdResult
+    test_metrics: dict
+    roc_points: tuple[list[float], list[float]] = field(repr=False)
     splits: Splits = field(repr=False)
 
     def summary(self) -> dict:
@@ -125,6 +162,12 @@ class TrainingResult:
             "calibrated": self.calibrated,
             "cv_roc_auc": self.cv_auc,
             "validation": self.val_metrics,
+            "threshold": {
+                "value": self.threshold.threshold,
+                "analytic_optimum": self.threshold.analytic_optimum,
+                "val_cost_per_customer": self.threshold.cost_per_customer,
+            },
+            "test": self.test_metrics,
             "split_sizes": {
                 "train": len(self.splits.y_train),
                 "val": len(self.splits.y_val),
@@ -161,15 +204,48 @@ def run(csv_path: Path) -> TrainingResult:
         "brier": float(brier_score_loss(splits.y_val, proba_val)),
         "ece": ece,
     }
-    return TrainingResult(pipeline, winner, calibrated, cv_auc, val_metrics, splits)
+
+    # Business threshold from validation (REQ-0003), then the single test
+    # evaluation now that every decision is final.
+    threshold = select_threshold(splits.y_val, proba_val)
+    test_metrics, roc_points = evaluate_final(pipeline, threshold.threshold, splits)
+
+    return TrainingResult(
+        pipeline,
+        winner,
+        calibrated,
+        cv_auc,
+        val_metrics,
+        threshold,
+        test_metrics,
+        roc_points,
+        splits,
+    )
+
+
+def package(result: TrainingResult, data_path: Path, output_dir: Path) -> dict:
+    """Write model.joblib + model_meta.json + plots (REQ-0007)."""
+    meta = metadata.build_metadata(result, result.threshold, result.test_metrics, data_path)
+    metadata.write_artifact(result.pipeline, meta, output_dir)
+    plots.write_plots(result, result.threshold, result.roc_points, output_dir)
+    return meta
 
 
 def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--data", type=Path, required=True, help="path to the Telco CSV")
+    parser.add_argument(
+        "--out", type=Path, default=Path("artifacts"), help="artifact output directory"
+    )
     args = parser.parse_args(argv)
     result = run(args.data)
-    print(json.dumps(result.summary(), indent=2))
+    meta = package(result, args.data, args.out)
+    print(
+        json.dumps(
+            result.summary() | {"model_version": meta["model_version"], "out": str(args.out)},
+            indent=2,
+        )
+    )
 
 
 if __name__ == "__main__":
