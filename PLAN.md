@@ -91,9 +91,12 @@ ROC AUC ≥ 0.83 recorded (REQ-0002) — if not met, iterate on the model here,
 1. `Dockerfile`: `public.ecr.aws/lambda/python:3.14`, install
    `src/requirements.txt`, copy `src/` + `artifacts/`; local check with the
    Lambda runtime interface emulator (`docker run` + curl) before any deploy.
-2. `template.yaml`: ECR-image Lambda (`PackageType: Image`, arm64, memory
-   sized in-phase — start 1024 MB, measure), Function URL (auth NONE for the
+2. `template.yaml`: ECR-image Lambda (`PackageType: Image`, memory sized
+   in-phase — start 1024 MB, measure), Function URL (auth NONE for the
    demo), DynamoDB table + 2 GSIs + TTL from `docs/DYNAMODB_DESIGN.md`,
+   **Revised in Phase 4:** originally arm64; switched to x86_64 because both
+   the dev machine and GitHub runners are x86_64 — cross-building arm64
+   images needs qemu/buildx for no cost benefit at free-tier volume.
    explicit least-privilege policy: `dynamodb:PutItem` on the table,
    CloudWatch logs/EMF only (NFR-0004). Cost caps per NFR-0008: log group
    with 30-day retention in the template, ECR lifecycle policy keeping 2

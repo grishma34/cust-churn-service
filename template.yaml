@@ -1,0 +1,106 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Transform: AWS::Serverless-2016-10-31
+Description: >
+  Customer churn prediction service: Lambda container image behind a Function
+  URL, DynamoDB prediction audit log (no-scan design), CloudWatch EMF metrics.
+  Every knob that costs money is capped per NFR-0008.
+
+Resources:
+  # Prediction audit log — schema is the source of truth for the test fixture
+  # (tests/conftest.py parses this file, so infra and tests cannot drift).
+  PredictionsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: PK
+          AttributeType: S
+        - AttributeName: SK
+          AttributeType: S
+        - AttributeName: GSI1PK
+          AttributeType: S
+        - AttributeName: GSI1SK
+          AttributeType: S
+        - AttributeName: GSI2PK
+          AttributeType: S
+        - AttributeName: GSI2SK
+          AttributeType: S
+      KeySchema:
+        - AttributeName: PK
+          KeyType: HASH
+        - AttributeName: SK
+          KeyType: RANGE
+      GlobalSecondaryIndexes:
+        - IndexName: GSI1 # AP2: by model version, newest first
+          KeySchema:
+            - AttributeName: GSI1PK
+              KeyType: HASH
+            - AttributeName: GSI1SK
+              KeyType: RANGE
+          Projection:
+            ProjectionType: INCLUDE
+            NonKeyAttributes:
+              - churnProbability
+              - churnPredicted
+              - modelVersion
+        - IndexName: GSI2 # AP3: by UTC day, newest first
+          KeySchema:
+            - AttributeName: GSI2PK
+              KeyType: HASH
+            - AttributeName: GSI2SK
+              KeyType: RANGE
+          Projection:
+            ProjectionType: INCLUDE
+            NonKeyAttributes:
+              - churnProbability
+              - churnPredicted
+              - modelVersion
+      TimeToLiveSpecification:
+        AttributeName: expiresAt
+        Enabled: true
+
+  InferenceFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub "${AWS::StackName}-inference"
+      PackageType: Image
+      Architectures:
+        - x86_64
+      MemorySize: 1024
+      Timeout: 30
+      Environment:
+        Variables:
+          TABLE_NAME: !Ref PredictionsTable
+          METRICS_NAMESPACE: cust-churn-service
+      FunctionUrlConfig:
+        AuthType: NONE # demo scope; upgrade path is API Gateway + auth
+      # Least privilege (NFR-0004): the function writes audit records and
+      # nothing else. Reads (AP1-AP3) belong to scripts/audit_query.py under
+      # the operator's own credentials. Log permissions come from the basic
+      # execution role SAM attaches.
+      Policies:
+        - Statement:
+            - Sid: AuditWriteOnly
+              Effect: Allow
+              Action: dynamodb:PutItem
+              Resource: !GetAtt PredictionsTable.Arn
+    Metadata:
+      Dockerfile: Dockerfile
+      DockerContext: .
+      DockerTag: inference
+
+  # Explicit log group so retention is 30 days, not forever (NFR-0008)
+  InferenceLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub "/aws/lambda/${AWS::StackName}-inference"
+      RetentionInDays: 30
+
+Outputs:
+  FunctionUrl:
+    Description: Public inference endpoint (POST /predict, GET /model, GET /health)
+    Value: !GetAtt InferenceFunctionUrl.FunctionUrl
+  TableName:
+    Value: !Ref PredictionsTable
+  FunctionName:
+    Value: !Ref InferenceFunction

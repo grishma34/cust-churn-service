@@ -29,7 +29,12 @@ $24.52/customer expected cost. 36 tests.
 no AWS account: handler → validate → Pipeline → threshold decision →
 conditional DynamoDB put + EMF line, all against the real fixture artifact
 on moto. Coverage gate live in CI at 90%; suite is 109 tests at 100%.
-Next: Phase 4 — container & AWS infra.
+
+**Phase 4 code-complete, deploy blocked** (2026-08-14). Dockerfile,
+template.yaml (lint-clean, property-pinned by tests), template-parsed test
+fixture, and the 13-check smoke script are all in. The remaining boxes need
+two things this machine doesn't have: **docker** (image build + RIE check)
+and **AWS credentials** (`aws login` / `aws configure`). 115 tests, 100%.
 
 ## Phase 0 — Skeleton & tooling
 - [x] Directory layout per `PROJECT_STRUCTURE.md` + `pyproject.toml` (ruff) + split requirements files
@@ -120,10 +125,24 @@ Next: Phase 4 — container & AWS infra.
 
 ## Phase 4 — Container & AWS infra
 - [ ] `Dockerfile` (lambda/python:3.14, src + artifacts only); local RIE curl check (REQ-0009)
-- [ ] `template.yaml`: image Lambda + Function URL + DynamoDB (2 GSIs, TTL) + least-privilege IAM (NFR-0004)
-- [ ] Test fixture parses table schema from `template.yaml`
+      Dockerfile written and guarded by `test_dockerfile_excludes_training`;
+      the RIE curl check is blocked: **docker is not installed on this
+      machine** (no passwordless sudo to install it).
+- [x] `template.yaml`: image Lambda + Function URL + DynamoDB (2 GSIs, TTL) + least-privilege IAM (NFR-0004)
+      `sam validate --lint` clean (locally and as a CI job). IAM is a single
+      `dynamodb:PutItem` statement, pinned by test. NFR-0008 caps in the
+      template: 30-day log retention, on-demand billing; x86_64 (see the
+      revision note in `PLAN.md` Phase 4). ECR lifecycle policy (keep 2)
+      lands with the pipeline in Phase 5, where the repo is created.
+- [x] Test fixture parses table schema from `template.yaml`
+      CFN-tag-tolerant loader in conftest; the moto table is now built from
+      the template's own AttributeDefinitions/GSIs/TTL.
 - [ ] Manual dev deploy; `scripts/smoke.sh` green against live URL
+      Script written (13 checks incl. DynamoDB traceability), `bash -n`
+      clean. Blocked: **no AWS credentials on this machine** (`aws sts
+      get-caller-identity` → NoCredentials) and no docker to build/push.
 - [ ] Cold start + warm p95 measured vs. NFR-0006; numbers recorded
+      Blocked on the deploy above.
 
 ## Phase 5 — CI/CD
 - [ ] OIDC provider + deploy role (bootstrap pattern from serverless-order-api)

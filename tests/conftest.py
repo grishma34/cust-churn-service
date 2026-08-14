@@ -12,12 +12,41 @@ from typing import Any
 
 import boto3
 import pytest
+import yaml
 from moto import mock_aws
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 FIXTURE_CSV = REPO_ROOT / "data" / "fixtures" / "telco_60.csv"
 
 TABLE_NAME = "churn-predictions"
+
+
+class CfnLoader(yaml.SafeLoader):
+    """SafeLoader that tolerates CloudFormation intrinsics (!Ref, !Sub,
+    !GetAtt, ...) by constructing their plain values."""
+
+
+def _construct_unknown(loader, tag_suffix, node):
+    if isinstance(node, yaml.ScalarNode):
+        return loader.construct_scalar(node)
+    if isinstance(node, yaml.SequenceNode):
+        return loader.construct_sequence(node)
+    return loader.construct_mapping(node)
+
+
+CfnLoader.add_multi_constructor("!", _construct_unknown)
+
+
+def load_template() -> dict[str, Any]:
+    return yaml.load((REPO_ROOT / "template.yaml").read_text(), Loader=CfnLoader)
+
+
+def table_properties() -> dict[str, Any]:
+    """The DynamoDB table as declared in template.yaml — the single source of
+    truth for the moto fixture, so infra and tests cannot drift (PLAN Phase 4)."""
+    resources = load_template()["Resources"]
+    [table] = [r for r in resources.values() if r["Type"] == "AWS::DynamoDB::Table"]
+    return table["Properties"]
 
 
 @pytest.fixture(scope="session")
@@ -121,55 +150,24 @@ def fixture_rows() -> list[dict[str, str]]:
 
 @pytest.fixture
 def predictions_table():
-    """moto-backed churn-predictions table per docs/DYNAMODB_DESIGN.md.
-
-    Phase 4 replaces the inline schema with one parsed from template.yaml so
-    infra and tests cannot drift.
-    """
+    """moto-backed churn-predictions table built from the ACTUAL template.yaml
+    schema — keys, GSIs, projections, and TTL all come from the template."""
+    props = table_properties()
     with mock_aws():
         client = boto3.client("dynamodb", region_name="us-east-1")
         client.create_table(
             TableName=TABLE_NAME,
-            BillingMode="PAY_PER_REQUEST",
-            AttributeDefinitions=[
-                {"AttributeName": "PK", "AttributeType": "S"},
-                {"AttributeName": "SK", "AttributeType": "S"},
-                {"AttributeName": "GSI1PK", "AttributeType": "S"},
-                {"AttributeName": "GSI1SK", "AttributeType": "S"},
-                {"AttributeName": "GSI2PK", "AttributeType": "S"},
-                {"AttributeName": "GSI2SK", "AttributeType": "S"},
-            ],
-            KeySchema=[
-                {"AttributeName": "PK", "KeyType": "HASH"},
-                {"AttributeName": "SK", "KeyType": "RANGE"},
-            ],
-            GlobalSecondaryIndexes=[
-                {
-                    "IndexName": "GSI1",
-                    "KeySchema": [
-                        {"AttributeName": "GSI1PK", "KeyType": "HASH"},
-                        {"AttributeName": "GSI1SK", "KeyType": "RANGE"},
-                    ],
-                    "Projection": {
-                        "ProjectionType": "INCLUDE",
-                        "NonKeyAttributes": ["churnProbability", "churnPredicted", "modelVersion"],
-                    },
-                },
-                {
-                    "IndexName": "GSI2",
-                    "KeySchema": [
-                        {"AttributeName": "GSI2PK", "KeyType": "HASH"},
-                        {"AttributeName": "GSI2SK", "KeyType": "RANGE"},
-                    ],
-                    "Projection": {
-                        "ProjectionType": "INCLUDE",
-                        "NonKeyAttributes": ["churnProbability", "churnPredicted", "modelVersion"],
-                    },
-                },
-            ],
+            BillingMode=props["BillingMode"],
+            AttributeDefinitions=props["AttributeDefinitions"],
+            KeySchema=props["KeySchema"],
+            GlobalSecondaryIndexes=props["GlobalSecondaryIndexes"],
         )
+        ttl = props["TimeToLiveSpecification"]
         client.update_time_to_live(
             TableName=TABLE_NAME,
-            TimeToLiveSpecification={"Enabled": True, "AttributeName": "expiresAt"},
+            TimeToLiveSpecification={
+                "Enabled": ttl["Enabled"],
+                "AttributeName": ttl["AttributeName"],
+            },
         )
         yield boto3.resource("dynamodb", region_name="us-east-1").Table(TABLE_NAME)
