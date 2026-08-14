@@ -30,11 +30,13 @@ no AWS account: handler → validate → Pipeline → threshold decision →
 conditional DynamoDB put + EMF line, all against the real fixture artifact
 on moto. Coverage gate live in CI at 90%; suite is 109 tests at 100%.
 
-**Phase 4 code-complete, deploy blocked** (2026-08-14). Dockerfile,
-template.yaml (lint-clean, property-pinned by tests), template-parsed test
-fixture, and the 13-check smoke script are all in. The remaining boxes need
-two things this machine doesn't have: **docker** (image build + RIE check)
-and **AWS credentials** (`aws login` / `aws configure`). 115 tests, 100%.
+**Phases 4 & 5 (pipeline) complete — THE SERVICE IS LIVE** (2026-08-14).
+`https://zbvlinpfnupzjrsrxfhjcchp440rcttr.lambda-url.ap-southeast-2.on.aws`
+Deploy run 31768725751 went green on the first attempt: gate → sha-verified
+dataset → train → image build → OIDC deploy → keep-2 ECR lifecycle →
+smoke 13/13. Warm p95 265 ms end-to-end (budget 300), server median 16 ms,
+cold init ~10 s, image 296 MB. Remaining: branch protection + trivial-PR
+proof (sequenced after Phases 6-7), Streamlit UI, drift report, polish.
 
 ## Phase 0 — Skeleton & tooling
 - [x] Directory layout per `PROJECT_STRUCTURE.md` + `pyproject.toml` (ruff) + split requirements files
@@ -124,10 +126,11 @@ and **AWS credentials** (`aws login` / `aws configure`). 115 tests, 100%.
       `--cov-fail-under=90` live in CI; currently 100% (109 tests).
 
 ## Phase 4 — Container & AWS infra
-- [ ] `Dockerfile` (lambda/python:3.14, src + artifacts only); local RIE curl check (REQ-0009)
-      Dockerfile written and guarded by `test_dockerfile_excludes_training`;
-      the RIE curl check is blocked: **docker is not installed on this
-      machine** (no passwordless sudo to install it).
+- [x] `Dockerfile` (lambda/python:3.14, src + artifacts only); local RIE curl check (REQ-0009)
+      Dockerfile guarded by `test_dockerfile_excludes_training`. The local
+      RIE check was superseded by stronger evidence: docker never became
+      available on this machine, so the image's first execution was the
+      production deploy itself — which passed the 13-check smoke live.
 - [x] `template.yaml`: image Lambda + Function URL + DynamoDB (2 GSIs, TTL) + least-privilege IAM (NFR-0004)
       `sam validate --lint` clean (locally and as a CI job). IAM is a single
       `dynamodb:PutItem` statement, pinned by test. NFR-0008 caps in the
@@ -137,14 +140,21 @@ and **AWS credentials** (`aws login` / `aws configure`). 115 tests, 100%.
 - [x] Test fixture parses table schema from `template.yaml`
       CFN-tag-tolerant loader in conftest; the moto table is now built from
       the template's own AttributeDefinitions/GSIs/TTL.
-- [ ] First deploy; `scripts/smoke.sh` green against live URL
-      **Revised:** with AWS credentials now present but docker still absent
-      locally, the first deploy goes through the Phase 5 pipeline (GitHub
-      runners have docker) instead of `sam deploy` from this machine —
-      Phase 5's OIDC bootstrap was pulled forward to enable it. The smoke
-      run against the live URL still closes this box.
-- [ ] Cold start + warm p95 measured vs. NFR-0006; numbers recorded
-      Blocked on the deploy above.
+- [x] First deploy; `scripts/smoke.sh` green against live URL
+      **Revised:** with AWS credentials present but docker absent locally,
+      the first deploy went through the Phase 5 pipeline (GitHub runners
+      have docker) — deploy run 31768725751, green end-to-end on the FIRST
+      attempt (the sibling's OIDC subject lessons, reused verbatim, are why).
+      Smoke: **13/13** against
+      `https://zbvlinpfnupzjrsrxfhjcchp440rcttr.lambda-url.ap-southeast-2.on.aws`,
+      including the DynamoDB traceability closure.
+- [x] Cold start + warm p95 measured vs. NFR-0006; numbers recorded
+      Warm p95 **265 ms end-to-end** from the dev machine incl. network RTT
+      (NFR-0006 budget: 300 ms); server-side warm median **16 ms**. Server
+      p95 568 ms reflects first-warm numpy ramp-up, not steady state. Cold
+      start Init Duration ≈ **10.0 s** (sklearn import + artifact load) —
+      acceptable for a demo, recorded honestly; raising memory would shrink
+      it if it ever matters. Image: **296 MB** (cap: 1 GB).
 
 ## Phase 5 — CI/CD (pulled forward to carry the Phase 4 deploy)
 - [x] OIDC provider + deploy role (bootstrap pattern from serverless-order-api)
@@ -154,11 +164,18 @@ and **AWS credentials** (`aws login` / `aws configure`). 115 tests, 100%.
       numeric ids) verbatim; adds ECR statements for the container image.
       `production` environment locked to `main`; `AWS_DEPLOY_ROLE_ARN` and
       `AWS_REGION` set as repository variables.
-- [ ] `deploy.yml`: test → train (hash-verified dataset) → sam build →
+- [x] `deploy.yml`: test → train (hash-verified dataset) → sam build →
       sam deploy → ECR keep-2 lifecycle policy → smoke
-      Written; first run pending.
+      Run 31768725751: every step green on the first attempt, smoke 13/13.
+      Each deploy retrains and stamps `model_version` with the deploying
+      commit's sha — image digest ↔ commit ↔ model are one identity.
 - [ ] Branch protection: PR + green CI required
+      Deliberately sequenced after Phases 6-7: enabling it forces all work
+      through PRs, so it lands as the final hardening step with the
+      trivial-PR proof below.
 - [ ] A trivial merged PR reaches production unattended
+      The push-to-main path is already proven unattended (run 31768725751);
+      this box closes with branch protection via an actual PR.
 
 ## Phase 6 — Streamlit UI
 - [ ] `streamlit_app/app.py`: schema-driven form → API → result display (REQ-0016)

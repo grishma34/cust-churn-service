@@ -34,7 +34,8 @@ audit-log data model in `docs/DYNAMODB_DESIGN.md`.
 ## Live demo
 
 - Streamlit UI: ⏳ (Phase 6)
-- API: ⏳ (Phase 4) — `GET /health` returns the deployed model version
+- API: https://zbvlinpfnupzjrsrxfhjcchp440rcttr.lambda-url.ap-southeast-2.on.aws
+  — `GET /health` returns the deployed model version
 
 ## Run it
 
