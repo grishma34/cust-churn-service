@@ -46,6 +46,9 @@ def test_function_shape(function):
     assert function["Environment"]["Variables"]["TABLE_NAME"] == "PredictionsTable"  # !Ref
     assert function["MemorySize"] >= 512  # sklearn + numpy need headroom (NFR-0006)
     assert function["Timeout"] <= 30
+    # NFR-0008: a public endpoint without a concurrency cap turns a request
+    # flood into a bill; the cap turns it into throttles.
+    assert 1 <= function["ReservedConcurrentExecutions"] <= 10
 
 
 def test_log_retention_capped_at_30_days(template):

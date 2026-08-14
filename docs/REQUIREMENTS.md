@@ -112,5 +112,8 @@ exact model that produced it.
   versions; CloudWatch log retention 30 days; **≤ 10 extracted custom metrics**
   (the always-free tier) — numeric features and headline counts become metrics,
   full categorical distributions stay in the EMF log lines and are read by the
-  drift report via Logs Insights instead of metric statistics. Expected steady
-  state ≈ $0–1/month.
+  drift report via Logs Insights instead of metric statistics. Abuse backstops
+  (added post-v1.0.0): reserved concurrency of 5 on the function, so a
+  request flood throttles instead of billing, and an account-level $5/month
+  AWS Budget with email alerts at 80% actual and 100% forecasted. Expected
+  steady state ≈ $0–1/month.
