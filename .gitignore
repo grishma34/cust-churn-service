@@ -1,0 +1,18 @@
+# environments & caches
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+coverage.xml
+.aws-sam/
+
+# datasets — repo carries only the README and the test fixture
+data/*
+!data/README.md
+!data/fixtures/
+
+# trained artifacts ship in the container image, not in git
+artifacts/

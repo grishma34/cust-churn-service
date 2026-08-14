@@ -1,0 +1,7 @@
+# Inference-image dependencies ONLY (claude.md rule 4).
+# scikit-learn pin must match training/requirements.txt exactly —
+# tests/unit/shared/test_requirements_pins.py enforces it.
+scikit-learn==1.9.0
+joblib==1.5.3
+boto3==1.43.71
+python-ulid==4.0.1

@@ -1,0 +1,7 @@
+# Offline training dependencies — never installed into the inference image.
+# scikit-learn pin must match src/requirements.txt exactly (artifact must
+# deserialize under the serving environment's sklearn).
+scikit-learn==1.9.0
+pandas==3.0.5
+matplotlib==3.11.1
+joblib==1.5.3

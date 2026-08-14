@@ -1,0 +1,8 @@
+# Everything needed to run the quality gate locally and in CI.
+-r src/requirements.txt
+-r training/requirements.txt
+pytest==9.1.1
+pytest-cov==7.1.0
+moto[dynamodb]==5.2.2
+ruff==0.16.3
+pyyaml==6.0.3

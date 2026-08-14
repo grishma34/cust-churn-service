@@ -1,0 +1,28 @@
+[project]
+name = "cust-churn-service"
+version = "0.1.0"
+description = "Customer churn prediction: sklearn Pipeline trained offline, served from a Lambda container image"
+requires-python = ">=3.14"
+
+[tool.ruff]
+line-length = 100
+target-version = "py314"
+src = ["src", "training", "tests", "scripts"]
+
+[tool.ruff.lint]
+select = [
+    "E",   # pycodestyle errors
+    "W",   # pycodestyle warnings
+    "F",   # pyflakes
+    "I",   # isort
+    "UP",  # pyupgrade
+    "B",   # bugbear
+    "SIM", # simplify
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
+# src/ modules import each other Lambda-style (`from shared...`), because in
+# the container image the contents of src/ sit directly on the path.
+pythonpath = ["src", "."]
