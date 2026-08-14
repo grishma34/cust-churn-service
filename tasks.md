@@ -6,12 +6,14 @@ Details per phase live in `PLAN.md`; requirement IDs in `docs/REQUIREMENTS.md`.
 
 ## Status
 
-Phase 0 in progress. Toolchain settled on Python **3.14** (matches the
-installed interpreter, the sibling project, and the Lambda `python:3.14` base
-image — docs updated from the originally drafted 3.13). Local gate green:
-ruff clean, 11 seed tests, 100% coverage. NFR-0008 (< $5/month cloud cost)
-added on 2026-08-14 with its design consequences (≤ 10 EMF metrics, ECR
-lifecycle policy, 30-day log retention).
+**Phase 0 complete** (2026-08-14). Public repo at
+`grishma34/cust-churn-service`; CI green on `main` (run 31765270584): ruff
+clean, 11 seed tests, 100% coverage. Toolchain settled on Python **3.14**
+(matches the installed interpreter, the sibling project, and the Lambda
+`python:3.14` base image — docs updated from the originally drafted 3.13).
+NFR-0008 (< $5/month cloud cost) added mid-phase with its design consequences
+(≤ 10 EMF metrics, ECR lifecycle policy, 30-day log retention). Next:
+Phase 1 — training pipeline.
 
 ## Phase 0 — Skeleton & tooling
 - [x] Directory layout per `PROJECT_STRUCTURE.md` + `pyproject.toml` (ruff) + split requirements files
@@ -24,10 +26,10 @@ lifecycle policy, 30-day log retention).
 - [x] `tests/conftest.py`: event factory, moto table fixture stub
       Table fixture already implements the full `docs/DYNAMODB_DESIGN.md`
       schema (2 GSIs + TTL); Phase 4 swaps it to parse `template.yaml`.
-- [ ] `.github/workflows/ci.yml` green on GitHub with one real seed test
-      Workflow written; 11 seed tests pass locally (error→HTTP mapping,
-      schema↔API-spec↔fixture drift guards, requirements pins). Awaiting
-      first push to verify on GitHub.
+- [x] `.github/workflows/ci.yml` green on GitHub with one real seed test
+      Verified: run 31765270584 on `main`, lint + 11 seed tests green
+      (error→HTTP mapping, schema↔API-spec↔fixture drift guards,
+      requirements pins), coverage artifact uploaded.
 
 ## Phase 1 — Training pipeline
 - [ ] `training/features.py`: `build_pipeline()` — ColumnTransformer + estimator in one Pipeline (REQ-0005)
