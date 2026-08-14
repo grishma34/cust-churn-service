@@ -1,85 +1,83 @@
-# DYNAMODB_DESIGN.md — Prediction audit log
+# DYNAMODB_DESIGN.md — the prediction audit log
 
-One table, `churn-predictions`, on-demand capacity. It exists for one reason:
-**traceability** (REQ-0010/0011) — any prediction anyone has ever seen can be
-looked up and attributed to the model version that produced it. Aggregate
-monitoring lives in CloudWatch, not here (see `docs/ARCHITECTURE.md`).
+## Why this table exists
 
-Same rules as `serverless-order-api`: every query maps to a documented access
-pattern below; **no Scans, ever**; adding a query means updating this doc first.
+One reason: **traceability** (REQ-0010/0011). Every prediction the service
+has ever made is written here with its inputs, its outputs, and the model
+version that produced it — so "a customer disputes this score" or "what did
+model X decide last week?" always has an answer.
 
-## Access patterns
+Aggregate monitoring ("what does traffic look like lately?") deliberately
+does NOT live here — that's CloudWatch's job (see `docs/ARCHITECTURE.md`).
 
-| ID | Pattern | Used by |
+## How to read this document
+
+DynamoDB isn't like a SQL database: you don't write ad-hoc queries later.
+You decide **up front** exactly which questions the table must answer, then
+shape the keys so each question is one fast, cheap lookup. Everything below
+follows from the three questions we committed to:
+
+| ID | The question | Who asks it |
 |---|---|---|
-| AP1 | Get one prediction by `prediction_id` | Support: "customer disputes this score" |
-| AP2 | List predictions by `model_version`, newest first | Model audit: "what did 1.0.0+ab12cd3 decide?" |
-| AP3 | List predictions for a UTC day, newest first | Ops spot-checks; drift investigation drill-down |
+| AP1 | "Show me prediction `<id>`" | Support, when a score is disputed |
+| AP2 | "What did model version X predict?" (newest first) | Model audits, champion/challenger comparisons |
+| AP3 | "What was predicted on day Y?" (newest first) | Ops spot-checks, drift investigations |
 
-## Table schema
+Two hard rules:
 
-Base table:
+- **No table scans, ever.** A scan reads the whole table to find something —
+  fine at 100 rows, ruinous at 100 million. Every read above uses an index
+  built for it, and a test fails the build if a `Scan` call ever appears.
+- **New question ⇒ update this document first**, then the code.
 
-| Attr | Value | Notes |
+## The table
+
+One item per prediction. The main key answers AP1; two secondary indexes
+(GSIs — think "extra sort orders maintained automatically") answer AP2 and
+AP3.
+
+**Main item** (`churn-predictions`, on-demand billing):
+
+| Attribute | Value | Notes |
 |---|---|---|
-| `PK` | `PRED#<prediction_id>` | prediction_id is a ULID (time-sortable) |
-| `SK` | `META` | single item per prediction |
+| `PK` | `PRED#<prediction_id>` | The ID is a ULID — sortable by creation time |
+| `SK` | `META` | One item per prediction |
 | `entityType` | `Prediction` | |
-| `predictionId` | ULID | |
-| `modelVersion` | e.g. `1.0.0+ab12cd3` | from `model_meta.json`, never client-supplied |
-| `churnProbability` | number | |
-| `churnPredicted` | bool | |
-| `threshold` | number | threshold in force at prediction time |
-| `features` | map | the validated raw inputs |
-| `createdAt` | ISO-8601 UTC | |
-| `expiresAt` | epoch seconds | TTL: 90 days |
+| `modelVersion` | e.g. `1.0.0+ab12cd3` | Comes from the model's own metadata, never from the client |
+| `churnProbability`, `churnPredicted`, `threshold` | the decision | Numbers stored as Decimal (DynamoDB rejects floats) |
+| `features` | map of all 19 inputs | Exactly what the model saw |
+| `createdAt` | ISO-8601 UTC timestamp | |
+| `expiresAt` | epoch seconds | **TTL: the record auto-deletes after 90 days** — audit window, not a data warehouse |
 
-GSI1 — by model version (AP2):
+**GSI1 — answers AP2** (by model version, newest first):
+partition `MODEL#<version>`, sort `TS#<createdAt>#<id>`.
 
-| Attr | Value |
-|---|---|
-| `GSI1PK` | `MODEL#<modelVersion>` |
-| `GSI1SK` | `TS#<createdAt>#<prediction_id>` |
+**GSI2 — answers AP3** (by UTC day, newest first):
+partition `DAY#<yyyy-mm-dd>`, sort `TS#<createdAt>#<id>`.
 
-GSI2 — by day (AP3):
+Both indexes copy in only the headline fields (`churnProbability`,
+`churnPredicted`, `modelVersion`) — enough to render a list cheaply; follow
+up with AP1 when you need the full inputs. Note this means list results
+carry the table key (`PK`), not a `predictionId` attribute — derive the id
+from `PK`.
 
-| Attr | Value |
-|---|---|
-| `GSI2PK` | `DAY#<yyyy-mm-dd>` |
-| `GSI2SK` | `TS#<createdAt>#<prediction_id>` |
+## How reads and writes actually happen
 
-Both GSIs project `KEYS_ONLY` + `churnProbability`, `churnPredicted`,
-`modelVersion` (INCLUDE) — enough to render a list without a second read;
-follow with AP1 for full features.
+- **Write** — one conditional `PutItem` per prediction, from
+  `src/data/prediction_repository.py` (the only file that talks to DynamoDB).
+  The condition (`attribute_not_exists(PK)`) means a duplicate ID would
+  error loudly instead of silently overwriting an audit record.
+- **Best-effort contract (REQ-0011)** — if the write fails, the caller still
+  gets their prediction; the failure is logged. An audit log that could take
+  down the service would be worse than a gap in the audit log. Never "fix"
+  this by making the write blocking.
+- **AP1** — `GetItem` on `PK`/`SK`.
+- **AP2 / AP3** — `Query` on the matching index, newest first, with cursor
+  pagination for long result sets.
 
-## Query shapes
+## Who can touch it
 
-- **AP1:** `GetItem(PK=PRED#<id>, SK=META)`
-- **AP2:** `Query GSI1, GSI1PK = MODEL#<version>, ScanIndexForward=False`,
-  cursor pagination via `LastEvaluatedKey`
-- **AP3:** `Query GSI2, GSI2PK = DAY#<date>, ScanIndexForward=False`, same
-  pagination
-
-## Write path
-
-Single `PutItem` per prediction from the repository layer
-(`src/data/prediction_repository.py` — the only module holding boto3 for
-DynamoDB). Condition expression `attribute_not_exists(PK)` — a ULID collision
-should be impossible, so surfacing it as an error beats silently overwriting
-an audit record.
-
-**Best-effort contract (REQ-0011):** the service layer wraps the write in a
-try/except; on failure it logs the error with the full item and still returns
-the prediction. An audit log that can take down inference would be worse than
-a gap in the audit log.
-
-## Retention
-
-TTL on `expiresAt` at 90 days. The table is an operational audit window, not a
-data warehouse; anything needed longer-term should be exported, not retained
-here.
-
-## Reader access
-
-AP2/AP3 are consumed by `scripts/audit_query.py` (CLI, read-only IAM), not by
-the Lambda — the inference function's policy allows `PutItem` only (NFR-0004).
+The Lambda's permissions allow **append only** — one `PutItem` action on
+this one table, nothing else (NFR-0004). It cannot read, update, or delete.
+Humans read the log through `scripts/audit_query.py`, which runs under the
+operator's own AWS credentials.
