@@ -178,9 +178,22 @@ proof (sequenced after Phases 6-7), Streamlit UI, drift report, polish.
       this box closes with branch protection via an actual PR.
 
 ## Phase 6 — Streamlit UI
-- [ ] `streamlit_app/app.py`: schema-driven form → API → result display (REQ-0016)
+- [x] `streamlit_app/app.py`: schema-driven form → API → result display (REQ-0016)
+      Tabbed form (Demographics/Services/Billing), model banner from
+      `GET /model`, probability metric + threshold-explained decision,
+      per-field 400 rendering, "new customer" null-TotalCharges path
+      (verified live: 76.5% for a tenure-0 month-to-month fiber profile).
+      Thin-client boundary test-enforced (no boto3/sklearn/src imports).
+      Served locally headless: HTTP 200, no errors.
 - [ ] Deployed to Streamlit Community Cloud; URL in README
-- [ ] Drift-guard test: form fields/domains == `schema.py`
+      Needs the account owner's browser: share.streamlit.io → sign in with
+      GitHub → New app → repo `grishma34/cust-churn-service`, branch `main`,
+      file `streamlit_app/app.py` → Deploy. No secrets needed (the live API
+      URL is the built-in default).
+- [x] Drift-guard test: form fields/domains == `schema.py`
+      AST-extracted literals compared byte-for-byte to the generated
+      domains; payload completeness and requirements thinness also pinned
+      (no streamlit needed in the test env).
 
 ## Phase 7 — Drift & polish
 - [ ] `scripts/drift_report.py`: PSI vs. baselines, >0.2 flags (REQ-0015); run once on real traffic
