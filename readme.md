@@ -7,35 +7,45 @@ can intervene — trained offline as a single scikit-learn Pipeline, served from
 a Lambda container image, tested by non-technical users through Streamlit, and
 monitored for data drift after release.
 
-> **Status:** design complete, implementation not started — see `tasks.md`.
-> Numbers below marked ⏳ get filled in from real runs (Phases 2, 4, 7).
+## Live demo
+
+- **Streamlit UI:** https://cust-churn-service-4n4yy8wr2pcouij7s5nzmh.streamlit.app
+- **API:** https://zbvlinpfnupzjrsrxfhjcchp440rcttr.lambda-url.ap-southeast-2.on.aws
+  — `GET /health` returns the deployed model version; endpoints in
+  [`docs/API_SPEC.md`](docs/API_SPEC.md)
 
 ## The claims, and what makes them true
 
-| Claim | Mechanism | Proof |
+| Claim | Real number | Proof |
 |---|---|---|
-| Classifier on **7,043** records, ⏳ ROC AUC | Stratified CV selection, held-out test split touched once | `model_meta.json` metrics; REQ-0002 |
-| Threshold from **business cost**, not 0.5 | Minimize `$50·FP + $450·FN` on validation ⇒ t ≈ 0.10 | Cost-curve plot; `tests/training/test_threshold.py` |
-| **No leakage / no train-serve skew** | Preprocessing + model in one `Pipeline`, fitted only on train | Leakage-guard test (`docs/TEST_STRATEGY.md`) |
-| Every prediction **traceable to its model** | `model_version` from artifact metadata in every response + DynamoDB item | End-to-end traceability test |
-| **Drift watched** after release | Input distributions → CloudWatch EMF; PSI vs. training baselines | `scripts/drift_report.py` |
+| Churn classifier on **7,043** records | Test ROC AUC **0.843**, PR AUC 0.634 — held-out split evaluated exactly once (AST-enforced single call site) | `model_meta.json`; `tests/training/test_leakage.py` |
+| Threshold from **business cost**, not 0.5 | **t = 0.065** from minimizing `$50·FP + $450·FN` on validation (analytic optimum 0.10) → 97% churner recall, $24.52 expected cost/customer | Cost-curve plot; `tests/training/test_threshold.py` |
+| **No leakage / no train-serve skew** | One `Pipeline` holds all preprocessing; a spy on `Pipeline.fit` proves no validation/test row is ever fitted; serving code contains no `fit(` | Leakage-guard tests; `docs/ARCHITECTURE.md` |
+| Every prediction **traceable to its model** | `model_version = <semver>+<git sha>` in every response and every DynamoDB audit item — the live audit log shows versions rolling as the pipeline deploys | End-to-end traceability test; `scripts/audit_query.py` |
+| **Drift watched** after release | PSI vs. training baselines from one Logs Insights query over EMF lines; first live run correctly flagged 18/19 features (traffic was synthetic smoke payloads — a monoculture IS drift) | `scripts/drift_report.py`; `tests/unit/scripts/` |
+
+Operations: warm p95 **265 ms** end-to-end (server median 16 ms), cold start
+~10 s, image 296 MB. Total AWS cost ≈ **$0–1/month** (NFR-0008: ≤ 10 CloudWatch
+metrics, keep-2 ECR lifecycle, 30-day log retention, on-demand DynamoDB + TTL,
+free Function URL). Quality gate: **126 tests, 100% coverage on `src/`**,
+enforced at 90% in CI.
 
 ## Architecture (short version)
 
 ```
 train.py ──► model.joblib + model_meta.json ──► Docker image ──► Lambda (Function URL)
                                                                    ├─► DynamoDB  (per-prediction audit log)
-Streamlit ──► POST /predict ──────────────────────────────────────►├─► CloudWatch (input distributions → PSI)
+Streamlit ──► POST /predict ──────────────────────────────────────►├─► CloudWatch (EMF → PSI drift report)
 ```
 
-Full rationale in `docs/ARCHITECTURE.md`; endpoints in `docs/API_SPEC.md`;
-audit-log data model in `docs/DYNAMODB_DESIGN.md`.
+Every merge to `main` retrains on the hash-verified dataset, stamps the model
+with the deploying commit's sha, builds the image, deploys via OIDC (no stored
+AWS keys), applies the ECR lifecycle policy, and runs a 13-check smoke test
+against production — unattended.
 
-## Live demo
-
-- Streamlit UI: https://cust-churn-service-4n4yy8wr2pcouij7s5nzmh.streamlit.app
-- API: https://zbvlinpfnupzjrsrxfhjcchp440rcttr.lambda-url.ap-southeast-2.on.aws
-  — `GET /health` returns the deployed model version
+Full rationale in [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md); data model in
+[`docs/DYNAMODB_DESIGN.md`](docs/DYNAMODB_DESIGN.md); what proves what in
+[`docs/TEST_STRATEGY.md`](docs/TEST_STRATEGY.md).
 
 ## Run it
 
@@ -47,18 +57,19 @@ pip install -r requirements-dev.txt
 ruff check src training tests scripts
 pytest --cov=src --cov-report=term-missing --cov-fail-under=90
 
-# train (dataset: see data/README.md)
+# train (dataset: see data/README.md — ~3 s)
 python -m training.train --data data/telco.csv
 
-# serve locally (Lambda runtime emulator)
-docker build -t cust-churn-service . && docker run -p 9000:8080 cust-churn-service
-
-# UI
+# UI against the live API
 streamlit run streamlit_app/app.py
+
+# operations
+python scripts/drift_report.py --hours 24     # PSI vs. training baselines
+python scripts/audit_query.py by-day 2026-08-14
 ```
 
 ## Repository guide
 
-Start with `PLAN.md` (build order) and `docs/REQUIREMENTS.md` (what "done"
-means, as REQ-#### IDs). `claude.md` holds the guardrails; `tasks.md` is the
-live checklist. Layout is mapped in `PROJECT_STRUCTURE.md`.
+Start with `PLAN.md` (build order) and `docs/REQUIREMENTS.md` (REQ-#### IDs).
+`claude.md` holds the guardrails; `tasks.md` is the completed checklist with
+evidence per box. Layout is mapped in `PROJECT_STRUCTURE.md`.

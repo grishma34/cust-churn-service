@@ -197,7 +197,21 @@ proof (sequenced after Phases 6-7), Streamlit UI, drift report, polish.
       (no streamlit needed in the test env).
 
 ## Phase 7 — Drift & polish
-- [ ] `scripts/drift_report.py`: PSI vs. baselines, >0.2 flags (REQ-0015); run once on real traffic
-- [ ] `scripts/audit_query.py` (AP2/AP3)
-- [ ] README: diagram, live URLs, real numbers in the resume bullets, claim-to-test table
+- [x] `scripts/drift_report.py`: PSI vs. baselines, >0.2 flags (REQ-0015); run once on real traffic
+      One Logs Insights query over the EMF lines feeds both numeric and
+      categorical PSI (zero extra metric cost, NFR-0008). First live run
+      (36 predictions/6 h): **18/19 features flagged — correctly**, because
+      production traffic is repeated synthetic smoke payloads and a
+      monoculture IS drift relative to the training distribution. Exit code
+      2 on drift makes it cron-able. Pure PSI math unit-tested offline.
+- [x] `scripts/audit_query.py` (AP2/AP3)
+      get/by-model/by-day over the repository layer, operator credentials
+      (the Lambda's role cannot read the table). Verified live: by-day
+      listing shows model versions rolling across pipeline deploys
+      (`1.0.0+d0ebe23` → `1.0.0+eb2651e`) — traceability in the wild.
+- [x] README: diagram, live URLs, real numbers in the resume bullets, claim-to-test table
+      All placeholders replaced with measured values: 7,043 records, test
+      ROC AUC 0.843, t=0.065, 97% recall, $24.52/customer, 265 ms warm p95,
+      ~$0-1/month.
 - [ ] Tag `v1.0.0`
+      After the final PR (below) deploys green.
