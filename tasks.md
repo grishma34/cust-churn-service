@@ -12,8 +12,13 @@ clean, 11 seed tests, 100% coverage. Toolchain settled on Python **3.14**
 (matches the installed interpreter, the sibling project, and the Lambda
 `python:3.14` base image — docs updated from the originally drafted 3.13).
 NFR-0008 (< $5/month cloud cost) added mid-phase with its design consequences
-(≤ 10 EMF metrics, ECR lifecycle policy, 30-day log retention). Next:
-Phase 1 — training pipeline.
+(≤ 10 EMF metrics, ECR lifecycle policy, 30-day log retention).
+
+**Phase 1 complete** (2026-08-14). Training runs end-to-end on the real CSV
+in ~3 s: LogisticRegression selected over HistGradientBoosting by 5-fold CV
+ROC AUC (0.848 vs 0.830), validation ROC AUC 0.836, well-calibrated
+(ECE 0.019, no wrap needed). 25 tests, `src/` coverage 100%. Next:
+Phase 2 — threshold & artifact contract.
 
 ## Phase 0 — Skeleton & tooling
 - [x] Directory layout per `PROJECT_STRUCTURE.md` + `pyproject.toml` (ruff) + split requirements files
@@ -32,12 +37,26 @@ Phase 1 — training pipeline.
       requirements pins), coverage artifact uploaded.
 
 ## Phase 1 — Training pipeline
-- [ ] `training/features.py`: `build_pipeline()` — ColumnTransformer + estimator in one Pipeline (REQ-0005)
-- [ ] `training/train.py`: stratified 60/20/20 split, 5-fold CV model selection (REQ-0001/0002)
-- [ ] Calibration check; `CalibratedClassifierCV` if needed (REQ-0004)
-- [ ] **Leakage-guard test: nothing fit outside the training split** (REQ-0006)
-- [ ] Raw-input test: fitted Pipeline predicts on unprocessed rows
-- [ ] Reproducibility test: two runs, identical metrics (NFR-0003)
+- [x] `training/features.py`: `build_pipeline()` — ColumnTransformer + estimator in one Pipeline (REQ-0005)
+      Positional column selection (no pandas in the inference image); sklearn
+      built-ins only so the artifact unpickles without the `training` package.
+      Column order pinned to `src/shared/schema.py` by test.
+- [x] `training/train.py`: stratified 60/20/20 split, 5-fold CV model selection (REQ-0001/0002)
+      Real run: **logistic_regression wins** (CV ROC AUC 0.848 vs 0.830 for
+      hist_gradient_boosting); validation ROC AUC 0.836. Test split created
+      but untouched — a test enforces that until Phase 2.
+- [x] Calibration check; `CalibratedClassifierCV` if needed (REQ-0004)
+      ECE gate (> 0.05 wraps in isotonic CalibratedClassifierCV). Real run:
+      ECE 0.019 — LR already well calibrated, no wrap. Gate exercised both
+      ways by tests.
+- [x] **Leakage-guard test: nothing fit outside the training split** (REQ-0006)
+      Dynamic: Pipeline.fit spy across the full entrypoint asserts zero
+      val/test rows in any fit (incl. every CV clone). Static: no `fit(` in
+      `src/`; training never imports serving.
+- [x] Raw-input test: fitted Pipeline predicts on unprocessed rows
+      Serving-shaped input: object array, JSON types, `None` TotalCharges —
+      plus the fixture's blank-TotalCharges rows through fit and predict.
+- [x] Reproducibility test: two runs, identical metrics (NFR-0003)
 
 ## Phase 2 — Threshold & artifact
 - [ ] `training/threshold.py`: cost sweep (FP $50 / FN $450), cost-curve plot (REQ-0003)

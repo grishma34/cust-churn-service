@@ -154,7 +154,7 @@ ROC AUC ≥ 0.83 recorded (REQ-0002) — if not met, iterate on the model here,
 | Test ROC AUC misses 0.83 | Caught in Phase 2 (test split evaluated there); iterate on features/model before any serving code exists |
 | sklearn version skew train ↔ serve | Same pinned version in both requirements files; a test asserts the pins match; artifact loads under `src/` deps in CI |
 | Container image bloat / slow cold start | Training deps excluded from image by rule 4; cold start measured in Phase 4 before CI/CD lands |
-| Blank `TotalCharges` strings break the Pipeline at serve time | Coercion handled inside the Pipeline (not the handler); fixture CSV includes such rows |
+| Blank `TotalCharges` strings break the Pipeline at serve time | Blank→NaN parse at the I/O boundary on both sides (read_csv na_values / JSON null); imputation inside the Pipeline; fixture CSV includes such rows |
 | Function URL is public (auth NONE) | Demo scope: no PII in requests, DynamoDB TTL 90d, note in README; API Gateway + auth is the documented upgrade path |
 | EMF metric cardinality (19 features) blows the $5/month cap (NFR-0008) | ≤ 10 extracted metrics; categorical distributions read from EMF log lines via Logs Insights, not per-dimension metrics |
 

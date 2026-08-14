@@ -24,8 +24,10 @@ a model is traceable to the exact bytes it was trained on.
 ## Known data quirks (handled inside the Pipeline, REQ-0005)
 
 - `TotalCharges` is a **string** column containing 11 blank (`" "`) values —
-  all rows with `tenure == 0`. Coercion to numeric + imputation happens inside
-  the Pipeline, never in handler code.
+  all rows with `tenure == 0`. The blank→NaN parse happens at the I/O boundary
+  (`read_csv(na_values=[" "])` in training; JSON `null` at the API), which is
+  symmetric on both sides; the **imputation** of those NaNs happens inside the
+  Pipeline, never in handler code.
 - `SeniorCitizen` is `0/1` integer while every other binary field is
   `Yes`/`No`; treated as categorical (see `src/shared/schema.py`).
 - Churn base rate ≈ 26.5% — imbalanced enough that ROC AUC alone flatters;
